@@ -47,7 +47,9 @@ def send_message(bot, message):
         logger.info('Начало отправки сообщения')
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except telegram.error.TelegramError:
-        raise telegram.error.BadRequest('Не удалось отправить сообщение в Telegram')
+        raise telegram.error.BadRequest(
+            'Не удалось отправить сообщение в Telegram'
+        )
     else:
         logger.info('Сообщение успешно отправлено.')
 
