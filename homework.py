@@ -9,13 +9,15 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
+from exception import ErrorTelegramNetwork
+
 load_dotenv()
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 60
+RETRY_TIME = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -44,9 +46,10 @@ logger.addHandler(handler_stream)
 def send_message(bot, message):
     """Отправка сообщения в Telegram чат."""
     try:
+        logger.info('Начало отправки сообщения')
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except Exception:
-        logger.error('Не удалось отправить сообщение в Telegram')
+    except telegram.error.TelegramError:
+        raise telegram.error.BadRequest('Не удалось отправить сообщение в Telegram')
     else:
         logger.info('Сообщение успешно отправлено.')
 
@@ -57,12 +60,10 @@ def get_api_answer(current_timestamp):
     params = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, headers=HEADERS, params=params)
-    except Exception as error:
-        logger.error(f'Ошибка при запросе к API: {error}')
-        raise Exception(f'Ошибка при запросе к API: {error}')
+    except requests.ConnectionError as error:
+        raise requests.ConnectionError(f'Ошибка при запросе к API: {error}')
     if response.status_code != HTTPStatus.OK:
         status_code = response.status_code
-        logger.error(f'Статус ошибки {status_code}')
         raise Exception(f'Статус ошибки {status_code}')
     return response.json()
 
@@ -71,14 +72,12 @@ def check_response(response: dict):
     """Проверка API на корректность."""
     try:
         homework = response['homeworks']
-    except KeyError:
-        logger.error('Отсутствует ключ homeworks')
+    except LookupError:
         raise KeyError('Отсутствует ключ homeworks')
     try:
         homework = homework[0]
-    except IndexError:
-        logger.error('Список работ пуст')
-        raise IndexError('Список работ пуст')
+    except LookupError:
+        raise KeyError('Список работ пуст')
     return homework
 
 
@@ -90,22 +89,21 @@ def parse_status(homework):
         raise KeyError('Нет ключа "status"')
     homework_name = homework['homework_name']
     homework_status = homework['status']
-    verdict = HOMEWORK_STATUSES[homework_status]
+    try:
+        verdict = HOMEWORK_STATUSES[homework_status]
+    except LookupError:
+        raise KeyError('Неверный ключ статуса работы')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens():
     """Проверка доступности переменных окружения."""
-    if (PRACTICUM_TOKEN is None or TELEGRAM_CHAT_ID is None
-            or TELEGRAM_TOKEN is None):
-        return False
-    else:
-        return True
+    return bool(PRACTICUM_TOKEN and TELEGRAM_CHAT_ID and TELEGRAM_TOKEN)
 
 
 def main():
     """Основная логика работы бота."""
-    if check_tokens() is False:
+    if not check_tokens():
         logger.critical(
             'Ошибка при получении глобальных переменных окружения. '
             'Программа принудительно остановлена.'
@@ -123,17 +121,19 @@ def main():
             homework = check_response(response)
             message = parse_status(homework)
             current_timestamp = response.get('current_date', current_timestamp)
-            time.sleep(RETRY_TIME)
+            if ((homework['homework_name'] != answer['homework_name'])
+                    or (message != message)):
+                send_message(bot, message)
+                answer.update(homework['homework_name'])
+                answer.update({'message': message})
         except Exception as error:
+            logger.error(f'Сбой в работе программы: {error}')
             message = f'Сбой в работе программы: {error}'
-            if response.get('homeworks') != answer.get('homeworks'):
+            if error.args != answer.get('error'):
                 send_message(bot, message)
-                answer.update(response)
+                answer.update({'error': error.args})
+        finally:
             time.sleep(RETRY_TIME)
-        else:
-            if response.get('homeworks') != answer.get('homeworks'):
-                send_message(bot, message)
-                answer.update(response)
 
 
 if __name__ == '__main__':
