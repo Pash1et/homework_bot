@@ -9,8 +9,7 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
-from exception import (ExceptionBadStatuscode,
-                       ExceptionSendMessage)
+from exception import BadStatuscodeError, SendMessageError
 
 load_dotenv()
 
@@ -49,9 +48,9 @@ def send_message(bot, message):
     try:
         logger.info('Начало отправки сообщения')
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-    except telegram.error.TelegramError:
-        raise ExceptionSendMessage(
-            'Не удалось отправить сообщение в Telegram'
+    except telegram.error.TelegramError as error:
+        raise SendMessageError(
+            f'Не удалось отправить сообщение в Telegram ({error})'
         )
     else:
         logger.info('Сообщение успешно отправлено.')
@@ -67,7 +66,7 @@ def get_api_answer(current_timestamp):
         raise requests.ConnectionError(f'Ошибка при запросе к API: {error}')
     if response.status_code != HTTPStatus.OK:
         status_code = response.status_code
-        raise ExceptionBadStatuscode(f'Статус ошибки {status_code}')
+        raise BadStatuscodeError(f'Статус ошибки {status_code}')
     return response.json()
 
 
@@ -127,10 +126,10 @@ def main():
             message = parse_status(homework)
             current_timestamp = response.get('current_date', current_timestamp)
             if (homework.get('homework_name') != answer.get('homework_name')
-                    and homework.get('status') != answer.get('status')):
+                    or homework.get('status') != answer.get('status')):
                 send_message(bot, message)
                 answer.update(homework)
-        except ExceptionSendMessage as error:
+        except SendMessageError as error:
             logger.error(f'Ошибка отправки сообщения: {error}')
         except Exception as error:
             logger.error(f'Сбой в работе программы: {error}')
