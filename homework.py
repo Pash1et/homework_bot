@@ -9,13 +9,16 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
+from exception import (ExceptionBadStatuscode,
+                       ExceptionSendMessage)
+
 load_dotenv()
 
 PRACTICUM_TOKEN = os.getenv('PRACTICUM_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-RETRY_TIME = 60
+RETRY_TIME = 5
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -47,7 +50,7 @@ def send_message(bot, message):
         logger.info('Начало отправки сообщения')
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
     except telegram.error.TelegramError:
-        raise telegram.error.BadRequest(
+        raise ExceptionSendMessage(
             'Не удалось отправить сообщение в Telegram'
         )
     else:
@@ -64,12 +67,14 @@ def get_api_answer(current_timestamp):
         raise requests.ConnectionError(f'Ошибка при запросе к API: {error}')
     if response.status_code != HTTPStatus.OK:
         status_code = response.status_code
-        raise Exception(f'Статус ошибки {status_code}')
+        raise ExceptionBadStatuscode(f'Статус ошибки {status_code}')
     return response.json()
 
 
 def check_response(response: dict):
     """Проверка API на корректность."""
+    if not isinstance(response, dict):
+        raise TypeError('Тип данных не словарь')
     try:
         homework = response['homeworks']
     except LookupError:
@@ -84,9 +89,9 @@ def check_response(response: dict):
 def parse_status(homework):
     """Извлечение информации о последней работе."""
     if 'homework_name' not in homework:
-        raise KeyError('Нет ключа "homework_name"')
+        raise KeyError('Нет ключа homework_name')
     if 'status' not in homework:
-        raise KeyError('Нет ключа "status"')
+        raise KeyError('Нет ключа status')
     homework_name = homework['homework_name']
     homework_status = homework['status']
     try:
@@ -121,11 +126,12 @@ def main():
             homework = check_response(response)
             message = parse_status(homework)
             current_timestamp = response.get('current_date', current_timestamp)
-            if ((homework['homework_name'] != answer['homework_name'])
-                    or (message != message)):
+            if (homework.get('homework_name') != answer.get('homework_name')
+                    and homework.get('status') != answer.get('status')):
                 send_message(bot, message)
-                answer.update(homework['homework_name'])
-                answer.update({'message': message})
+                answer.update(homework)
+        except ExceptionSendMessage as error:
+            logger.error(f'Ошибка отправки сообщения: {error}')
         except Exception as error:
             logger.error(f'Сбой в работе программы: {error}')
             message = f'Сбой в работе программы: {error}'
