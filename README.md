@@ -14,6 +14,10 @@ python -m venv venv
 ```
 source venv/script/Activate
 ```
+Установите зависимости из файла requirements.txt
+```
+pip install -r requirements.txt
+```
 В файле homework.py необходимо заполнить переменные окружения своими данными  
 ```
 PRACTICUM_TOKEN = ...  
